@@ -1,0 +1,110 @@
+name: Build ASR Image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: asr-image
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set image name
+        id: image
+        shell: bash
+        run: |
+          echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/kejian-asr" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ./asr-service
+          file: ./asr-service/Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: kejian-asr:verify
+          cache-from: type=gha,scope=kejian-asr
+          cache-to: type=gha,mode=max,scope=kejian-asr
+
+      - name: Verify model startup and authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASR_SERVICE_TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::$ASR_SERVICE_TOKEN"
+          export ASR_SERVICE_TOKEN
+          docker run -d --name asr-check --publish 127.0.0.1:18090:8090 \
+            --env ASR_SERVICE_TOKEN kejian-asr:verify
+          ready=false
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --max-time 3 http://127.0.0.1:18090/health \
+                --output "$RUNNER_TEMP/asr-health.json"; then
+              ready=true
+              break
+            fi
+            if [ "$(docker inspect --format '{{.State.Running}}' asr-check)" != true ]; then
+              echo "ASR container exited before becoming ready"
+              exit 1
+            fi
+            sleep 5
+          done
+          if [ "$ready" != true ]; then
+            echo "ASR did not become ready within the startup window"
+            exit 1
+          fi
+          python -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["status"] == "ready" and d["streaming"] is True, d' \
+            "$RUNNER_TEMP/asr-health.json"
+          status="$(curl --silent --show-error --max-time 10 --output /dev/null \
+            --write-out '%{http_code}' --request POST http://127.0.0.1:18090/transcribe)"
+          test "$status" = 401
+          status="$(curl --silent --show-error --max-time 10 --output /dev/null \
+            --write-out '%{http_code}' --request POST \
+            --header "Authorization: Bearer $ASR_SERVICE_TOKEN" \
+            http://127.0.0.1:18090/transcribe)"
+          test "$status" = 422
+
+      - name: Collect startup logs and remove test container
+        if: always()
+        shell: bash
+        run: |
+          docker logs asr-check 2>&1 || true
+          docker rm --force asr-check >/dev/null 2>&1 || true
+
+      - name: Push verified image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ steps.image.outputs.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          docker tag kejian-asr:verify "$IMAGE:sha-$GITHUB_SHA"
+          docker tag kejian-asr:verify "$IMAGE:latest"
+          docker push "$IMAGE:sha-$GITHUB_SHA"
+          docker push "$IMAGE:latest"
+          {
+            echo '## ASR image built and startup checks passed'
+            echo
+            echo "Image: \`$IMAGE:sha-$GITHUB_SHA\`"
+            echo
+            echo 'Package visibility is not changed by this workflow.'
+            echo 'Configure registry pull access before deploying this image.'
+            echo 'Use port 8090 and provide ASR_SERVICE_TOKEN at runtime.'
+            echo 'Real-audio accuracy and cloud capacity are not verified by these checks.'
+          } >> "$GITHUB_STEP_SUMMARY"

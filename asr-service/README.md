@@ -8,6 +8,33 @@ Model files and runtime secrets must not be committed to Git.
 
 ## WeChat Cloud Hosting
 
+### Recommended: build the image on GitHub
+
+When the cloud source builder stalls on PyTorch downloads, open the repository's
+Actions tab, choose **Build ASR Image**, then **Run workflow** on `main`.
+This workflow is manual-only; pushing code does not launch it or deploy services.
+GitHub Actions usage and package storage may consume the account's plan allowance.
+
+The workflow builds `asr-service/Dockerfile` for Linux amd64, starts a container
+with an ephemeral test secret, verifies offline/streaming model readiness and
+authentication, then pushes the verified image to GitHub Container Registry.
+It uses GitHub's automatic token; do not add production secrets to the workflow.
+The final run summary contains the immutable `sha-...` image tag to deploy.
+
+The workflow does not make packages public. New GHCR packages are private by
+default. Before cloud deployment, configure authorized registry access or mirror
+the image into an authorized Tencent registry. If using anonymous image-address
+pulling, explicitly decide whether to make this image package public; do not
+make the source repository public just to allow image pulls. Never put database,
+WeChat, admin or ASR credentials in an image. Reachability of GHCR from the cloud
+still needs verification; a Tencent registry mirror may be needed.
+
+In the cloud console, use image deployment instead of source building, with the
+verified image address, port `8090`, internal access and the runtime secret below.
+Keep the previous working Java API and its database settings unchanged.
+
+### Alternative: cloud source build
+
 - Create a separate service named `kejian-asr` in the same environment as `kejian-api`.
 - Repository: `wuken666/kejian-backend`, branch: `main`.
 - Build directory: `asr-service` (no leading slash).
