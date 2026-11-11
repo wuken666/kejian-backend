@@ -6,6 +6,15 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class WechatCodeExchangeClientTests {
     @Test
+    void diagnosticIncludesCauseTypesWithoutCredentialBearingMessages() {
+        var failure = new org.springframework.web.client.ResourceAccessException(
+            "https://example.com?secret=private-secret&js_code=private-code",
+            new javax.net.ssl.SSLHandshakeException("private-secret"));
+        assertEquals("ResourceAccessException -> SSLHandshakeException",
+            WechatCodeExchangeClient.safeCauseTypes(failure));
+    }
+
+    @Test
     void parsesWechatJsonEvenWhenDeliveredAsText() {
         assertEquals("test-openid", WechatCodeExchangeClient.parseResponse("{\"openid\":\"test-openid\"}").get("openid"));
         assertEquals(40029, WechatCodeExchangeClient.parseResponse("{\"errcode\":40029}").get("errcode"));

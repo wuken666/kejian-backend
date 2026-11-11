@@ -71,9 +71,21 @@ public class WechatCodeExchangeClient {
             log.warn("wechat_login code exchange failed status={}", exception.getStatusCode().value());
             throw new ResponseStatusException(BAD_GATEWAY, "微信登录服务暂时不可用", exception);
         } catch (RuntimeException exception) {
-            log.warn("wechat_login code exchange failed error_type={}", exception.getClass().getSimpleName());
+            log.warn("wechat_login code exchange failed error_type={} cause_types={}",
+                exception.getClass().getSimpleName(), safeCauseTypes(exception));
             throw new ResponseStatusException(BAD_GATEWAY, "微信登录服务暂时不可用", exception);
         }
+    }
+
+    // Exception messages may contain the request URL and its credentials.
+    static String safeCauseTypes(Throwable failure) {
+        StringBuilder types = new StringBuilder();
+        for (int depth = 0; failure != null && depth < 8; depth++) {
+            if (!types.isEmpty()) types.append(" -> ");
+            types.append(failure.getClass().getSimpleName());
+            failure = failure.getCause();
+        }
+        return types.toString();
     }
 
     static URI sessionUri(String appId, String secret, String code) {
