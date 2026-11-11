@@ -1,6 +1,6 @@
 # 课见后端
 
-独立的 Spring Boot API 仓库，不包含小程序、网页前端、学生数据或录音文件。`asr-service/` 保留现有 Python 语音识别源码，需单独准备运行环境和模型；它不会随 Java Dockerfile 自动部署。
+独立的 Spring Boot API 仓库，不包含小程序、网页前端、学生数据或录音文件。`asr-service/` 包含独立的 Python 语音识别服务及 Dockerfile；它不会随 Java Dockerfile 自动部署。
 
 ## 运行和构建
 
@@ -19,5 +19,5 @@
 ## 目录
 
 - `src/`：Java API、数据库迁移与测试。
-- `asr-service/`：现有 Python 识别服务源码，尚未完成独立云端部署配置。
+- `asr-service/`：Python 识别服务及 CPU 镜像构建配置，部署参数见该目录的 README。Java API 连接时需设置 `ASR_BASE_URL` 和与识别服务相同的 `ASR_SERVICE_TOKEN`。
 - `Dockerfile`：仅构建 Java API。

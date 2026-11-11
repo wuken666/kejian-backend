@@ -36,8 +36,10 @@ public class AsrClient {
     private final Duration timeout;
     private final Duration dialogueTimeout;
     private final ObjectMapper objectMapper;
+    private final String serviceToken;
 
     public AsrClient(Environment environment) {
+        this.serviceToken = environment.getProperty("services.asr.service-token", "").strip();
         String baseUrl = environment.getProperty("services.asr.base-url", "http://127.0.0.1:8090");
         int timeoutSeconds = environment.getProperty("services.asr.timeout-seconds", Integer.class, 45);
         int dialogueTimeoutSeconds = environment.getProperty(
@@ -108,7 +110,7 @@ public class AsrClient {
                 "external_call provider=funasr operation=transcribe transport=jdk_http phase=start hotword_count={}",
                 hotwords.size()
             );
-            HttpRequest request = HttpRequest.newBuilder(transcribeUri)
+            HttpRequest request = authenticatedRequest(transcribeUri)
                 .timeout(timeout)
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
                 .POST(HttpRequest.BodyPublishers.ofByteArray(multipartBody(boundary, audio, hotwords)))
@@ -171,7 +173,7 @@ public class AsrClient {
                 audioPaths.size(),
                 hotwords.size()
             );
-            HttpRequest request = HttpRequest.newBuilder(transcribeDialogueUri)
+            HttpRequest request = authenticatedRequest(transcribeDialogueUri)
                 .timeout(dialogueTimeout)
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
                 .POST(HttpRequest.BodyPublishers.ofByteArray(
@@ -207,6 +209,12 @@ public class AsrClient {
             Thread.currentThread().interrupt();
             throw new ResponseStatusException(BAD_GATEWAY, "课堂说话人识别已中断", exception);
         }
+    }
+
+    private HttpRequest.Builder authenticatedRequest(URI uri) {
+        HttpRequest.Builder request = HttpRequest.newBuilder(uri);
+        if (!serviceToken.isEmpty()) request.header("Authorization", "Bearer " + serviceToken);
+        return request;
     }
 
     // 使用 JDK 原生 multipart，避免 Spring HTTP 客户端版本冲突影响本地 ASR 调用。

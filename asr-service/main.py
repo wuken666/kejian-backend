@@ -20,12 +20,15 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, W
 from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
 from pydantic import BaseModel
+from service_auth import ServiceTokenMiddleware, validate_service_token
 
 MODEL_DIR = os.environ.get("FUNASR_MODEL_DIR", "iic/SenseVoiceSmall")
 STREAMING_MODEL_DIR = os.environ.get(
     "FUNASR_STREAMING_MODEL_DIR",
     "iic/speech_paraformer_asr_nat-zh-cn-16k-common-vocab8404-online",
 )
+VAD_MODEL_DIR = os.environ.get("FUNASR_VAD_MODEL_DIR", "fsmn-vad")
+SPEAKER_MODEL_DIR = os.environ.get("FUNASR_SPEAKER_MODEL_DIR", "cam++")
 MAX_AUDIO_BYTES = int(os.environ.get("ASR_MAX_AUDIO_BYTES", str(50 * 1024 * 1024)))
 DIALOGUE_MAX_AUDIO_BYTES = int(
     os.environ.get("ASR_DIALOGUE_MAX_AUDIO_BYTES", str(250 * 1024 * 1024))
@@ -212,9 +215,9 @@ def get_dialogue_model() -> AutoModel:
         device = "cuda" if torch.cuda.is_available() else "cpu"
         dialogue_model = AutoModel(
             model=MODEL_DIR,
-            vad_model="fsmn-vad",
+            vad_model=VAD_MODEL_DIR,
             vad_kwargs={"max_single_segment_time": 5000},
-            spk_model="cam++",
+            spk_model=SPEAKER_MODEL_DIR,
             device=device,
             disable_update=True,
         )
@@ -431,10 +434,11 @@ def combine_audio(paths: list[Path]) -> Path:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global model, streaming_model, dialogue_model
+    validate_service_token()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = AutoModel(
         model=MODEL_DIR,
-        vad_model="fsmn-vad",
+        vad_model=VAD_MODEL_DIR,
         vad_kwargs={"max_single_segment_time": 30000},
         device=device,
         disable_update=True,
@@ -455,11 +459,14 @@ async def lifespan(_: FastAPI):
     dialogue_model = None
 
 
-app = FastAPI(title="Teacher Feedback ASR", lifespan=lifespan)
+app = FastAPI(title="Teacher Feedback ASR", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+app.add_middleware(ServiceTokenMiddleware)
 
 
 @app.get("/health")
 def health() -> dict[str, str | bool]:
+    if model is None:
+        raise HTTPException(status_code=503, detail="Models are loading")
     return {
         "status": "ready" if model is not None else "loading",
         "streaming": streaming_model is not None,
@@ -580,7 +587,10 @@ async def transcribe(
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as normalized_file:
             normalized_path = Path(normalized_file.name)
         write_pcm_wav(normalized_path, suppress_background_noise(decoded))
-        return transcribe_file(normalized_path, parse_hotwords(hotwords), audio_metrics)
+        async with offline_lock:
+            return await asyncio.to_thread(
+                transcribe_file, normalized_path, parse_hotwords(hotwords), audio_metrics
+            )
     except av.error.InvalidDataError as error:
         raise HTTPException(status_code=422, detail="Audio segment is unreadable") from error
     finally:
