@@ -3,6 +3,8 @@ FROM python:3.11-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
+    PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=8 \
     ASR_REQUIRE_TOKEN=true \
     OMP_NUM_THREADS=2 \
     MKL_NUM_THREADS=2 \
@@ -16,9 +18,11 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libgomp1 ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt requirements-cpu.txt ./
-RUN python -m pip install -r requirements-cpu.txt \
-    && python -m pip install -r requirements.txt \
+COPY requirements-cpu.txt ./
+RUN python -m pip install -r requirements-cpu.txt
+
+COPY requirements.txt ./
+RUN python -m pip install -r requirements.txt \
     && python -m pip check
 
 COPY prepare_models.py ./
