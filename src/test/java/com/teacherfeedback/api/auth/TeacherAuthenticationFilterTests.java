@@ -24,6 +24,17 @@ import static org.mockito.Mockito.when;
 class TeacherAuthenticationFilterTests {
     private final TeacherLoginSessionRepository sessionRepository = mock(TeacherLoginSessionRepository.class);
 
+    @Test
+    void rejectsUnauthenticatedStreamingHandshake() throws Exception {
+        var request = new MockHttpServletRequest("GET", "/asr-stream");
+        request.addHeader("Upgrade", "websocket");
+        var response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+        new TeacherAuthenticationFilter(sessionRepository, true, 1L).doFilter(request, response, chain);
+        assertThat(response.getStatus()).isEqualTo(401);
+        verify(chain, never()).doFilter(request, response);
+    }
+
     @AfterEach
     void clearTeacherContext() {
         TeacherContext.clear();
