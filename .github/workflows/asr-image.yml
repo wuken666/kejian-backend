@@ -77,6 +77,16 @@ jobs:
             --header "Authorization: Bearer $ASR_SERVICE_TOKEN" \
             http://127.0.0.1:18090/transcribe)"
           test "$status" = 422
+          curl --fail --location --retry 3 --max-time 90 \
+            'https://isv-data.oss-cn-hangzhou.aliyuncs.com/ics/MaaS/ASR/test_audio/BAC009S0764W0121.wav' \
+            --output "$RUNNER_TEMP/asr-sample.wav"
+          curl --fail-with-body --silent --show-error --max-time 120 \
+            --header "Authorization: Bearer $ASR_SERVICE_TOKEN" \
+            --form "audio=@$RUNNER_TEMP/asr-sample.wav" \
+            http://127.0.0.1:18090/transcribe-dialogue \
+            --output "$RUNNER_TEMP/asr-dialogue.json"
+          python -c 'import json,sys; d=json.load(open(sys.argv[1])); assert isinstance(d.get("text"),str) and d["text"].strip(), "No recognized speech"; assert isinstance(d.get("segments"),list); print("Whole-recording inference passed")' \
+            "$RUNNER_TEMP/asr-dialogue.json"
 
       - name: Collect startup logs and remove test container
         if: always()

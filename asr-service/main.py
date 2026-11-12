@@ -9,6 +9,7 @@ import time
 import asyncio
 import json
 import logging
+import uuid
 import wave
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -29,6 +30,7 @@ STREAMING_MODEL_DIR = os.environ.get(
 )
 VAD_MODEL_DIR = os.environ.get("FUNASR_VAD_MODEL_DIR", "fsmn-vad")
 SPEAKER_MODEL_DIR = os.environ.get("FUNASR_SPEAKER_MODEL_DIR", "cam++")
+MODEL_THREADS = max(1, int(os.environ.get("ASR_MODEL_THREADS", "2")))
 MAX_AUDIO_BYTES = int(os.environ.get("ASR_MAX_AUDIO_BYTES", str(50 * 1024 * 1024)))
 DIALOGUE_MAX_AUDIO_BYTES = int(
     os.environ.get("ASR_DIALOGUE_MAX_AUDIO_BYTES", str(250 * 1024 * 1024))
@@ -209,18 +211,9 @@ def transcribe_file(
 
 
 def get_dialogue_model() -> AutoModel:
-    """延迟加载说话人分离模型，避免影响实时字幕服务的启动速度。"""
-    global dialogue_model
+    """Only return the pipeline loaded before the service becomes ready."""
     if dialogue_model is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        dialogue_model = AutoModel(
-            model=MODEL_DIR,
-            vad_model=VAD_MODEL_DIR,
-            vad_kwargs={"max_single_segment_time": 5000},
-            spk_model=SPEAKER_MODEL_DIR,
-            device=device,
-            disable_update=True,
-        )
+        raise RuntimeError("Dialogue model is not ready")
     return dialogue_model
 
 
@@ -436,20 +429,41 @@ async def lifespan(_: FastAPI):
     global model, streaming_model, dialogue_model
     validate_service_token()
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    torch.set_num_threads(MODEL_THREADS)
+    started = time.perf_counter()
+    logger.info("asr_startup stage=offline phase=start device=%s threads=%s", device, MODEL_THREADS)
     model = AutoModel(
         model=MODEL_DIR,
         vad_model=VAD_MODEL_DIR,
         vad_kwargs={"max_single_segment_time": 30000},
         device=device,
         disable_update=True,
+        ncpu=MODEL_THREADS,
     )
+    logger.info("asr_startup stage=offline phase=finish duration_seconds=%.3f", time.perf_counter() - started)
+    started = time.perf_counter()
+    logger.info("asr_startup stage=dialogue phase=start")
+    dialogue_model = AutoModel(
+        model=MODEL_DIR,
+        vad_model=VAD_MODEL_DIR,
+        vad_kwargs={"max_single_segment_time": 5000},
+        spk_model=SPEAKER_MODEL_DIR,
+        device=device,
+        disable_update=True,
+        ncpu=MODEL_THREADS,
+    )
+    logger.info("asr_startup stage=dialogue phase=finish duration_seconds=%.3f", time.perf_counter() - started)
+    started = time.perf_counter()
+    logger.info("asr_startup stage=streaming phase=start")
     try:
         streaming_model = AutoModel(
             model=STREAMING_MODEL_DIR,
             device=device,
             disable_update=True,
             disable_pbar=True,
+            ncpu=MODEL_THREADS,
         )
+        logger.info("asr_startup stage=streaming phase=finish duration_seconds=%.3f", time.perf_counter() - started)
     except Exception:
         logger.exception("Streaming ASR model failed to load")
         streaming_model = None
@@ -465,11 +479,12 @@ app.add_middleware(ServiceTokenMiddleware)
 
 @app.get("/health")
 def health() -> dict[str, str | bool]:
-    if model is None:
+    if model is None or dialogue_model is None:
         raise HTTPException(status_code=503, detail="Models are loading")
     return {
         "status": "ready" if model is not None else "loading",
         "streaming": streaming_model is not None,
+        "dialogue": dialogue_model is not None,
     }
 
 
@@ -607,6 +622,10 @@ async def transcribe_dialogue(
     """接收整节课音频，在课后执行高精度转写和双人说话人分离。"""
     temp_paths: list[Path] = []
     total_bytes = 0
+    request_id = uuid.uuid4().hex
+    stage = "receive_audio"
+    started = time.perf_counter()
+    logger.info("asr_dialogue request_id=%s stage=%s phase=start", request_id, stage)
     try:
         for item in audio:
             suffix = Path(item.filename or "segment.webm").suffix.lower() or ".webm"
@@ -622,15 +641,37 @@ async def transcribe_dialogue(
         if not temp_paths:
             raise HTTPException(status_code=422, detail="Lesson audio is empty")
 
-        normalized_path = combine_audio(temp_paths)
+        logger.info("asr_dialogue request_id=%s stage=receive_audio phase=finish segments=%s bytes=%s duration_seconds=%.3f",
+                    request_id, len(temp_paths), total_bytes, time.perf_counter() - started)
+        stage = "decode_audio"
+        stage_started = time.perf_counter()
+        logger.info("asr_dialogue request_id=%s stage=%s phase=start", request_id, stage)
+        normalized_path = await asyncio.to_thread(combine_audio, temp_paths)
+        logger.info("asr_dialogue request_id=%s stage=%s phase=finish duration_seconds=%.3f",
+                    request_id, stage, time.perf_counter() - stage_started)
+        stage = "wait_inference"
+        stage_started = time.perf_counter()
+        logger.info("asr_dialogue request_id=%s stage=%s phase=start", request_id, stage)
         async with dialogue_lock:
-            return await asyncio.to_thread(
+            logger.info("asr_dialogue request_id=%s stage=%s phase=finish duration_seconds=%.3f",
+                        request_id, stage, time.perf_counter() - stage_started)
+            stage = "inference"
+            stage_started = time.perf_counter()
+            logger.info("asr_dialogue request_id=%s stage=%s phase=start", request_id, stage)
+            result = await asyncio.to_thread(
                 transcribe_dialogue_file,
                 normalized_path,
                 parse_hotwords(hotwords),
             )
+            logger.info("asr_dialogue request_id=%s stage=%s phase=finish duration_seconds=%.3f total_seconds=%.3f",
+                        request_id, stage, time.perf_counter() - stage_started, time.perf_counter() - started)
+            return result
     except av.error.InvalidDataError as error:
         raise HTTPException(status_code=422, detail="Lesson audio is unreadable") from error
+    except Exception as error:
+        logger.error("asr_dialogue request_id=%s stage=%s phase=failure error_type=%s duration_seconds=%.3f",
+                     request_id, stage, type(error).__name__, time.perf_counter() - started)
+        raise
     finally:
         if "normalized_path" in locals():
             normalized_path.unlink(missing_ok=True)

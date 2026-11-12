@@ -18,6 +18,8 @@ GitHub Actions usage and package storage may consume the account's plan allowanc
 The workflow builds `asr-service/Dockerfile` for Linux amd64, starts a container
 with an ephemeral test secret, verifies offline/streaming model readiness and
 authentication, then pushes the verified image to GitHub Container Registry.
+It also submits a public FunASR sample recording to `/transcribe-dialogue` and
+requires nonempty recognized text within 120 seconds before publishing the image.
 It uses GitHub's automatic token; do not add production secrets to the workflow.
 The final run summary contains the immutable `sha-...` image tag to deploy.
 
@@ -48,6 +50,14 @@ Keep the previous working Java API and its database settings unchanged.
 - Model loading completes before Uvicorn listens. Allow sufficient startup grace in
   the platform health check (start with 180 seconds and inspect startup logs).
   The Docker HEALTHCHECK does not necessarily override the platform's health checks.
+- Offline, dialogue (including speaker separation) and streaming pipelines are
+  loaded before readiness. The first classroom request must not construct models.
+  The dialogue pipeline still has its own recognition weights; this intentionally
+  preserves existing inference behavior and does not claim to eliminate all copies.
+  `ASR_MODEL_THREADS` defaults to 2; measure memory after all pipelines are loaded.
+  Startup failure is preferable to reporting ready and hanging on the first request.
+- Search `asr_startup` for model initialization stages and `asr_dialogue` for
+  receive/decode/queue/inference timing. These logs do not include audio or text.
 
 After the ASR instance is healthy, add these variables to a new Java API version:
 
