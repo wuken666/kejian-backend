@@ -165,31 +165,36 @@ public class AsrClient {
         if (audioPaths.isEmpty()) {
             return new DialogueTranscriptionResult("", List.of(), 0, false);
         }
+        String stage = "read_audio";
+        long startedAt = System.nanoTime();
         try {
             String boundary = "----TeacherFeedback" + UUID.randomUUID().toString().replace("-", "");
             log.info(
                 "external_call provider=funasr operation=transcribe_dialogue phase=start segment_count={} "
-                    + "hotword_count={}",
+                    + "hotword_count={} target_host={} target_port={}",
                 audioPaths.size(),
-                hotwords.size()
+                hotwords.size(),
+                transcribeDialogueUri.getHost(),
+                transcribeDialogueUri.getPort() >= 0 ? transcribeDialogueUri.getPort()
+                    : ("https".equals(transcribeDialogueUri.getScheme()) ? 443 : 80)
             );
+            byte[] body = dialogueMultipartBody(boundary, audioPaths, hotwords);
             HttpRequest request = authenticatedRequest(transcribeDialogueUri)
                 .timeout(dialogueTimeout)
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                .POST(HttpRequest.BodyPublishers.ofByteArray(
-                    dialogueMultipartBody(boundary, audioPaths, hotwords)
-                ))
+                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
+            stage = "send_request";
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() / 100 != 2) {
                 log.warn(
                     "external_call provider=funasr operation=transcribe_dialogue phase=failure "
-                        + "status={} response={}",
-                    response.statusCode(),
-                    response.body()
+                        + "stage=read_response status={}",
+                    response.statusCode()
                 );
                 throw new ResponseStatusException(BAD_GATEWAY, "课堂说话人识别失败，请稍后重试");
             }
+            stage = "parse_response";
             DialogueAsrResponse payload = objectMapper.readValue(
                 response.body(),
                 DialogueAsrResponse.class
@@ -204,7 +209,19 @@ public class AsrClient {
                 Boolean.TRUE.equals(payload.speakerSeparationReliable())
             );
         } catch (IOException exception) {
-            throw new ResponseStatusException(BAD_GATEWAY, "课堂音频读取失败，请重试", exception);
+            Throwable root = exception;
+            for (int depth = 0; root.getCause() != null && depth < 8; depth++) root = root.getCause();
+            // Do not log exception messages: they can include file paths or response content.
+            log.warn("external_call provider=funasr operation=transcribe_dialogue phase=failure "
+                    + "stage={} error_type={} root_type={} duration_ms={}",
+                stage, exception.getClass().getSimpleName(), root.getClass().getSimpleName(),
+                (System.nanoTime() - startedAt) / 1_000_000);
+            String reason = switch (stage) {
+                case "read_audio" -> "课堂音频读取失败，请重试";
+                case "parse_response" -> "语音识别服务返回内容异常，请稍后重试";
+                default -> "语音识别服务连接或响应异常，录音已保留，请稍后重试";
+            };
+            throw new ResponseStatusException(BAD_GATEWAY, reason, exception);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw new ResponseStatusException(BAD_GATEWAY, "课堂说话人识别已中断", exception);
