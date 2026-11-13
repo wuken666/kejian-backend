@@ -308,6 +308,15 @@ public class LessonSessionService {
         );
     }
 
+    @Transactional(readOnly = true)
+    public void validateAudioUpload(Long sessionId, String ownerToken) {
+        LessonSession session = requireSession(sessionId);
+        ensureRecordingOwnerIfProvided(session, ownerToken);
+        if (!RESUMABLE_STATUSES.contains(session.getStatus())) {
+            throw new ResponseStatusException(BAD_REQUEST, "已结束的课堂不能继续接收录音片段");
+        }
+    }
+
     @Transactional
     public LessonSessionResponse complete(Long sessionId) {
         return complete(sessionId, null, null, false);
