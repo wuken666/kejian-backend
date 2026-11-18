@@ -59,9 +59,6 @@ final class LessonContentQuality {
     ) {
         requireField(courseTitle, 2, "请补充明确的课程主题。");
         requireField(content, 6, "课堂内容不足，请补充实际讲解或练习的知识点。");
-        if (performance != null && !performance.isBlank()) {
-            requireField(performance, 4, "学生表现不足，请补充已掌握或需要加强的具体情况。");
-        }
         String normalizedHomework = homework == null ? "" : homework.strip();
         if (!normalizedHomework.isBlank() && !EXPLICIT_NO_HOMEWORK.matcher(normalizedHomework).matches()) {
             requireField(homework, 2, "请补充课后练习，或明确填写“本节无作业”。");

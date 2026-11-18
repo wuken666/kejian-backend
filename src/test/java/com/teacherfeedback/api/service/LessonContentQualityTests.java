@@ -13,6 +13,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class LessonContentQualityTests {
 
     @Test
+    void acceptsOptionalOrBriefTeacherPerformanceWithoutBlockingFeedback() {
+        for (String performance : new String[] {null, "", " ", "状态好", "良好"}) {
+            assertDoesNotThrow(() -> LessonContentQuality.requireMeaningfulLesson(
+                "英语语法", "复习 because 连词与 for 介词的使用。", performance, ""));
+        }
+    }
+
+    @Test
     void rejectsFillerOnlyTranscriptsBeforeCallingAi() {
         assertThrows(
             ResponseStatusException.class,
