@@ -3,9 +3,10 @@ FROM maven:3.9.13-eclipse-temurin-21 AS build
 WORKDIR /app
 
 COPY pom.xml ./
+COPY .mvn/cloud-settings.xml /app/cloud-settings.xml
 
 COPY src src
-RUN mvn -B -DskipTests package
+RUN mvn -B -s /app/cloud-settings.xml -DskipTests package
 
 FROM eclipse-temurin:21-jre-jammy
 
