@@ -15,7 +15,8 @@ class FeedbackPreferencesTests {
         assertTrue(instruction.contains("薄弱处最多保留 1 到 3 个"));
         assertTrue(instruction.contains("没有证据就不要硬说"));
         assertTrue(instruction.contains("删除阅读理解文章情节"));
-        assertTrue(instruction.contains("简洁版控制在 3 到 5 句"));
+        assertTrue(instruction.contains("按知识点编号分行"));
+        assertTrue(instruction.contains("错题数、分数和作业范围"));
         assertFalse(instruction.contains("只保留最重要的 1 到 3 个知识点类别"));
         assertFalse(instruction.contains("350 到 500 个汉字"));
     }

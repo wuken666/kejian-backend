@@ -210,6 +210,8 @@ class LessonRecordServiceTests {
         LessonCreationResponse response = service().createLesson(1L, request);
 
         assertTrue(response.feedback().content().contains("复习第三人称单数变化和助动词选择"));
+        assertTrue(response.feedback().content().startsWith("2026.08.12 小雨英语课反馈\n\n课堂内容：\n1. "));
+        assertFalse(response.feedback().content().contains("课后作业："));
         assertFalse(response.feedback().content().contains("课堂表现："));
         assertFalse(response.feedback().content().contains("课后练习："));
     }

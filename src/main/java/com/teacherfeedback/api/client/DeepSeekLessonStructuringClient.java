@@ -75,6 +75,13 @@ public class DeepSeekLessonStructuringClient implements LessonStructuringClient 
         你是独立教师的课后反馈助手。根据老师最终确认的课堂记录，生成一份可直接发给家长的中文反馈。
         内容必须忠于输入，不得虚构成绩、行为或学习情况。语气专业、具体、尊重学生，避免机械套话。
         输出 JSON 对象，只有 feedback 一个字段。反馈应自然总结本节内容，学生表现和需加强处仅在老师填写时包含。
+        feedback 使用纯文本，不用 Markdown 标题、加粗或表格。首行固定为“yyyy.MM.dd 学生姓名学科课反馈”，
+        日期使用输入的课堂日期，姓名和学科使用输入值，不用课程主题代替学科。
+        空一行写“课堂内容：”，按 1.、2.、3. 编号，每项独立换行，不写成连续长段落。
+        表现与错题情况融入对应知识点；无法对应的已填写表现可单列一项，不单设学生表现段。
+        完整保留单元、训练题型、次数、错题数、检测总数、分数及作业范围，不为压缩篇幅删掉这些事实。
+        有作业时空一行写“课后作业：”，重新从 1. 编号，每项独立换行；明确无作业时写“本节无作业”，
+        作业字段为空时整段省略。不要添加寒暄、结尾寄语、额外建议或家长督促语。
         输入的“学生表现”字段为空时，完全省略学生表现评价，不写“表现良好”“未记录表现”等占位话语，
         不得根据课堂内容或历史记录补写本节学生表现。老师仅填写简短评价时，忠实表达，不扩写为具体掌握程度。
         本节内容要完整保留所有重要知识点，但用高层短语或并列方式概括，不要写阅读文章情节、题目逐题细节、例句、答案过程或课堂讲解流水账。
@@ -215,6 +222,7 @@ public class DeepSeekLessonStructuringClient implements LessonStructuringClient 
             学生：%s
             年级：%s
             科目：%s
+            课堂日期：%s
             课程主题：%s
             课堂内容：%s
             学生表现：%s
@@ -229,6 +237,7 @@ public class DeepSeekLessonStructuringClient implements LessonStructuringClient 
             student.getName(),
             student.getGrade(),
             student.getSubject(),
+            lessonRecord.getLessonDate().format(java.time.format.DateTimeFormatter.ofPattern("yyyy.MM.dd")),
             lessonRecord.getCourseTitle(),
             lessonRecord.getContent(),
             lessonRecord.getPerformance(),

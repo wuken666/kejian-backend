@@ -33,7 +33,7 @@ import static org.springframework.http.HttpStatus.BAD_REQUEST;
 public class LessonRecordService {
     @org.springframework.beans.factory.annotation.Autowired
     private com.teacherfeedback.api.dao.ScheduledLessonRepository scheduledLessonRepository;
-    private static final DateTimeFormatter CHINESE_DATE = DateTimeFormatter.ofPattern("M 月 d 日");
+    private static final DateTimeFormatter CHINESE_DATE = DateTimeFormatter.ofPattern("yyyy.MM.dd");
 
     private final StudentRepository studentRepository;
     private final LessonRecordRepository lessonRecordRepository;
@@ -261,43 +261,34 @@ public class LessonRecordService {
     }
 
     private String composeParentFeedback(Student student, LessonRecord lesson) {
-        String learningGoalSection = student.getLearningGoal().isBlank()
-            ? ""
-            : """
-
-                当前学习目标：
-                %s
-                """.formatted(student.getLearningGoal());
-        String performanceSection = lesson.getPerformance().isBlank()
-            ? ""
-            : """
-
-                课堂表现：
-                %s
-                """.formatted(lesson.getPerformance());
+        String classroomContent = lesson.getContent()
+            + (lesson.getPerformance().isBlank() ? "" : "\n" + lesson.getPerformance());
         String homeworkSection = lesson.getHomework().isBlank()
             ? ""
             : """
 
-                课后练习：
+                课后作业：
                 %s
-                """.formatted(lesson.getHomework());
+                """.formatted(numberedLines(lesson.getHomework()));
         return """
-            【%s %s课后反馈】
+            %s %s%s课反馈
 
-            本节课内容：
-            %s%s%s%s
-
-            课堂日期：%s
+            课堂内容：
+            %s%s
             """.formatted(
+            lesson.getLessonDate().format(CHINESE_DATE),
             student.getName(),
-            lesson.getCourseTitle(),
-            lesson.getContent(),
-            performanceSection,
-            homeworkSection,
-            learningGoalSection,
-            lesson.getLessonDate().format(CHINESE_DATE)
+            student.getSubject(),
+            numberedLines(classroomContent),
+            homeworkSection
         ).strip();
+    }
+
+    private String numberedLines(String text) {
+        var lines = text.lines().map(String::strip).filter(line -> !line.isBlank()).toList();
+        return java.util.stream.IntStream.range(0, lines.size())
+            .mapToObj(index -> (index + 1) + ". " + lines.get(index).replaceFirst("^\\d+[.、．]\\s*", ""))
+            .collect(java.util.stream.Collectors.joining("\n"));
     }
 
     private record GeneratedFeedback(
