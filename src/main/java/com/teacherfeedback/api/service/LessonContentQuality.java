@@ -104,8 +104,26 @@ final class LessonContentQuality {
         boolean homeworkConfirmed = !normalizedHomework.isBlank()
             && !EXPLICIT_NO_HOMEWORK.matcher(normalizedHomework).matches();
         if (!homeworkConfirmed
-            && UNCONFIRMED_HOMEWORK.matcher(feedback.replaceAll("\\s+", "")).find()) {
+            && UNCONFIRMED_HOMEWORK.matcher(feedback.replaceAll("\\s+", "")
+                .replace("本节无作业", "").replace("本节课无作业", "")).find()) {
             throw insufficient("AI 反馈疑似加入了未确认的课后作业，请重新生成。");
+        }
+    }
+
+    static void requireSummarizedFeedback(String feedback, String content) {
+        String source = informativeText(content);
+        String result = informativeText(feedback);
+        // Long copied paragraphs remain a transcript even when the model adds numbering.
+        if (source.length() >= 200 && result.contains(source)) {
+            throw insufficient("AI 尚未完成课堂归纳，原始转写已保留，请重新生成反馈。");
+        }
+        if (source.length() >= 200) {
+            for (String paragraph : content.split("\\R+")) {
+                String normalized = informativeText(paragraph);
+                if (normalized.length() >= 120 && result.contains(normalized)) {
+                    throw insufficient("AI 尚未完成课堂归纳，原始转写已保留，请重新生成反馈。");
+                }
+            }
         }
     }
 

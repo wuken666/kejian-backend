@@ -23,7 +23,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 import static org.springframework.http.HttpStatus.NOT_FOUND;
@@ -33,7 +32,6 @@ import static org.springframework.http.HttpStatus.BAD_REQUEST;
 public class LessonRecordService {
     @org.springframework.beans.factory.annotation.Autowired
     private com.teacherfeedback.api.dao.ScheduledLessonRepository scheduledLessonRepository;
-    private static final DateTimeFormatter CHINESE_DATE = DateTimeFormatter.ofPattern("yyyy.MM.dd");
 
     private final StudentRepository studentRepository;
     private final LessonRecordRepository lessonRecordRepository;
@@ -101,7 +99,7 @@ public class LessonRecordService {
         lessonRecord.linkScheduledLesson(request.scheduledLessonId());
 
         GeneratedFeedback generatedFeedback = analysis == null
-            ? generateFeedbackWithFallback(student, lessonRecord, recentLessons, preferences)
+            ? generateValidatedFeedback(student, lessonRecord, recentLessons, preferences)
             : finalFeedback(
                 student,
                 lessonRecord,
@@ -163,6 +161,7 @@ public class LessonRecordService {
                     analysis.getFeedbackDraft(),
                     lessonRecord.getHomework()
                 );
+                LessonContentQuality.requireSummarizedFeedback(analysis.getFeedbackDraft(), lessonRecord.getContent());
                 return new GeneratedFeedback(
                     analysis.getFeedbackDraft(),
                     FeedbackGenerationSource.ANALYSIS
@@ -171,34 +170,27 @@ public class LessonRecordService {
                 // 分析草稿不符合课堂事实时，继续走安全反馈，不把错误草稿直接发给家长。
             }
         }
-        return generateFeedbackWithFallback(student, lessonRecord, recentLessons, preferences);
+        return generateValidatedFeedback(student, lessonRecord, recentLessons, preferences);
     }
 
-    private GeneratedFeedback generateFeedbackWithFallback(
+    private GeneratedFeedback generateValidatedFeedback(
         Student student,
         LessonRecord lessonRecord,
         List<LessonRecord> recentLessons,
         FeedbackPreferences preferences
     ) {
-        try {
-            String generatedFeedback = lessonStructuringClient.generateFeedback(
-                student,
-                lessonRecord,
-                recentLessons,
-                preferences
-            );
-            LessonContentQuality.requireGeneratedFeedback(generatedFeedback, lessonRecord.getHomework());
-            return new GeneratedFeedback(
-                generatedFeedback,
-                FeedbackGenerationSource.AI
-            );
-        } catch (ResponseStatusException exception) {
-            // AI 不可用或违反课堂事实时，使用老师已确认字段生成确定性反馈，保证流程可完成。
-            return new GeneratedFeedback(
-                composeParentFeedback(student, lessonRecord),
-                FeedbackGenerationSource.FALLBACK
-            );
-        }
+        String generatedFeedback = lessonStructuringClient.generateFeedback(
+            student,
+            lessonRecord,
+            recentLessons,
+            preferences
+        );
+        LessonContentQuality.requireGeneratedFeedback(generatedFeedback, lessonRecord.getHomework());
+        LessonContentQuality.requireSummarizedFeedback(generatedFeedback, lessonRecord.getContent());
+        return new GeneratedFeedback(
+            generatedFeedback,
+            FeedbackGenerationSource.AI
+        );
     }
 
     private List<LessonRecord> recentLessons(Long studentId) {
@@ -258,37 +250,6 @@ public class LessonRecordService {
             feedback.getRevisedAt(),
             feedback.getConfirmedAt()
         );
-    }
-
-    private String composeParentFeedback(Student student, LessonRecord lesson) {
-        String classroomContent = lesson.getContent()
-            + (lesson.getPerformance().isBlank() ? "" : "\n" + lesson.getPerformance());
-        String homeworkSection = lesson.getHomework().isBlank()
-            ? ""
-            : """
-
-                课后作业：
-                %s
-                """.formatted(numberedLines(lesson.getHomework()));
-        return """
-            %s %s%s课反馈
-
-            课堂内容：
-            %s%s
-            """.formatted(
-            lesson.getLessonDate().format(CHINESE_DATE),
-            student.getName(),
-            student.getSubject(),
-            numberedLines(classroomContent),
-            homeworkSection
-        ).strip();
-    }
-
-    private String numberedLines(String text) {
-        var lines = text.lines().map(String::strip).filter(line -> !line.isBlank()).toList();
-        return java.util.stream.IntStream.range(0, lines.size())
-            .mapToObj(index -> (index + 1) + ". " + lines.get(index).replaceFirst("^\\d+[.、．]\\s*", ""))
-            .collect(java.util.stream.Collectors.joining("\n"));
     }
 
     private record GeneratedFeedback(

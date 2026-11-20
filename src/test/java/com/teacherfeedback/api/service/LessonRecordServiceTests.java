@@ -157,7 +157,7 @@ class LessonRecordServiceTests {
     }
 
     @Test
-    void aiFailureFallsBackWithoutInventingStudentPerformance() {
+    void aiFailureDoesNotPublishSourceAsFeedback() {
         Student student = new Student("小雨", "初二", "英语", "");
         CreateLessonRequest request = request();
         when(studentRepository.findById(1L)).thenReturn(Optional.of(student));
@@ -170,23 +170,12 @@ class LessonRecordServiceTests {
             any(FeedbackPreferences.class)
         ))
             .thenThrow(new ResponseStatusException(BAD_GATEWAY, "AI 服务暂不可用"));
-        when(feedbackRepository.save(any(Feedback.class)))
-            .thenAnswer(invocation -> invocation.getArgument(0));
-
-        LessonCreationResponse response = service().createLesson(1L, request);
-        String feedback = response.feedback().content();
-
-        assertEquals("FALLBACK", response.feedback().generationSource());
-        assertTrue(feedback.contains("课堂参与积极，长句分析还需更细心"));
-        assertTrue(feedback.contains("完成练习册第 12 页"));
-        assertFalse(feedback.contains("能够回忆并说出"));
-        assertFalse(feedback.contains("在老师追问时"));
-        assertFalse(feedback.contains("当前学习目标"));
-        assertFalse(feedback.contains("暂未填写"));
+        assertThrows(ResponseStatusException.class, () -> service().createLesson(1L, request));
+        verify(feedbackRepository, never()).save(any(Feedback.class));
     }
 
     @Test
-    void unknownPerformanceAndHomeworkStayAbsentFromFallbackFeedback() {
+    void aiFailureWithoutOptionalFieldsDoesNotPublishSourceAsFeedback() {
         Student student = new Student("小雨", "初二", "英语", "");
         CreateLessonRequest request = new CreateLessonRequest(
             "一般现在时复习",
@@ -204,20 +193,12 @@ class LessonRecordServiceTests {
             .thenAnswer(invocation -> invocation.getArgument(0));
         when(lessonStructuringClient.generateFeedback(any(), any(), any(), any()))
             .thenThrow(new ResponseStatusException(BAD_GATEWAY, "AI 服务暂不可用"));
-        when(feedbackRepository.save(any(Feedback.class)))
-            .thenAnswer(invocation -> invocation.getArgument(0));
-
-        LessonCreationResponse response = service().createLesson(1L, request);
-
-        assertTrue(response.feedback().content().contains("复习第三人称单数变化和助动词选择"));
-        assertTrue(response.feedback().content().startsWith("2026.08.12 小雨英语课反馈\n\n课堂内容：\n1. "));
-        assertFalse(response.feedback().content().contains("课后作业："));
-        assertFalse(response.feedback().content().contains("课堂表现："));
-        assertFalse(response.feedback().content().contains("课后练习："));
+        assertThrows(ResponseStatusException.class, () -> service().createLesson(1L, request));
+        verify(feedbackRepository, never()).save(any(Feedback.class));
     }
 
     @Test
-    void unconfirmedHomeworkFromAiFallsBackToTeacherFacts() {
+    void unconfirmedHomeworkFromAiDoesNotPublishSourceAsFeedback() {
         Student student = new Student("小雨", "初二", "英语", "");
         CreateLessonRequest request = new CreateLessonRequest(
             "一般现在时复习",
@@ -235,15 +216,8 @@ class LessonRecordServiceTests {
             .thenAnswer(invocation -> invocation.getArgument(0));
         when(lessonStructuringClient.generateFeedback(any(), any(), any(), any()))
             .thenReturn("本节复习一般现在时，建议课后完成相关练习。");
-        when(feedbackRepository.save(any(Feedback.class)))
-            .thenAnswer(invocation -> invocation.getArgument(0));
-
-        LessonCreationResponse response = service().createLesson(1L, request);
-
-        assertEquals("FALLBACK", response.feedback().generationSource());
-        assertTrue(response.feedback().content().contains("复习第三人称单数变化和助动词选择"));
-        assertFalse(response.feedback().content().contains("作业"));
-        assertFalse(response.feedback().content().contains("课后练习"));
+        assertThrows(ResponseStatusException.class, () -> service().createLesson(1L, request));
+        verify(feedbackRepository, never()).save(any(Feedback.class));
     }
 
     @Test

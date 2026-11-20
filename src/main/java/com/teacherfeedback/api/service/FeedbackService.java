@@ -100,6 +100,7 @@ public class FeedbackService {
             preferences
         );
         LessonContentQuality.requireGeneratedFeedback(regenerated, lesson.getHomework());
+        LessonContentQuality.requireSummarizedFeedback(regenerated, lesson.getContent());
         feedback.replaceGenerated(regenerated, FeedbackGenerationSource.REGENERATED);
         return toResponse(feedback);
     }

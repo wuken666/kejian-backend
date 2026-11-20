@@ -142,6 +142,28 @@ class FeedbackServiceTests {
     }
 
     @Test
+    void unconfirmedAiHomeworkDoesNotOverwriteExistingFeedback() {
+        for (String aiContent : List.of("复习关系代词。课后作业：完成练习册第 99 页。")) {
+            Student student = new Student("小雨", "初二", "英语", "巩固语法");
+            LessonRecord lesson = new LessonRecord(student, "定语从句复习", 60,
+                "复习关系代词", "", "", LocalDate.of(2026, 11, 20));
+            Feedback feedback = new Feedback(lesson, "PARENT", "原反馈");
+            feedback.confirm();
+            when(feedbackRepository.findByIdAndLessonRecordStudentId(8L, 2L))
+                .thenReturn(Optional.of(feedback));
+            when(lessonRecordRepository.findByStudentIdOrderByLessonDateDescIdDesc(2L))
+                .thenReturn(List.of(lesson));
+            when(lessonStructuringClient.generateFeedback(student, lesson, List.of(),
+                FeedbackPreferences.fromNullable(null, null))).thenReturn(aiContent);
+
+            assertThrows(ResponseStatusException.class, () -> service().regenerateFeedback(
+                2L, 8L, new RegenerateFeedbackRequest(null, null)));
+            assertEquals("原反馈", feedback.getContent());
+            assertNotNull(feedback.getConfirmedAt());
+        }
+    }
+
+    @Test
     void aiFailureDoesNotOverwriteExistingFeedback() {
         Feedback feedback = feedback();
         LessonRecord lesson = feedback.getLessonRecord();

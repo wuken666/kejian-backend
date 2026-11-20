@@ -11,6 +11,22 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class LessonContentQualityTests {
+    @Test
+    void rejectsLongTranscriptCopiedWithNumberingButAcceptsSummary() {
+        String source = "然后我们复习定语从句哈，这个关系代词还是要继续练习，阅读错了一题。".repeat(12);
+        assertThrows(ResponseStatusException.class, () ->
+            LessonContentQuality.requireSummarizedFeedback("课堂内容：\n1. " + source, source));
+        assertDoesNotThrow(() -> LessonContentQuality.requireSummarizedFeedback(
+            "课堂内容：\n1. 复习定语从句与关系代词。\n2. 阅读训练，错1题。", source));
+    }
+
+    @Test
+    void noHomeworkStatementDoesNotTriggerInventedHomeworkGuard() {
+        assertDoesNotThrow(() -> LessonContentQuality.requireGeneratedFeedback(
+            "复习定语从句。本节无作业。", ""));
+        assertThrows(ResponseStatusException.class, () -> LessonContentQuality.requireGeneratedFeedback(
+            "本节无作业。但请家长督促课后完成练习册。", ""));
+    }
 
     @Test
     void acceptsOptionalOrBriefTeacherPerformanceWithoutBlockingFeedback() {
